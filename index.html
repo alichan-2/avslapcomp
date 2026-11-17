@@ -67,6 +67,7 @@ a{color:var(--accent2)}
 .tile .acts button{width:22px;height:22px;border-radius:6px;border:0;background:rgba(15,14,19,.85);color:#fff;display:grid;place-items:center;padding:0}
 .tile .acts button:hover{background:var(--accent)}
 .tile .acts svg{width:12px;height:12px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
+.tile .lo{position:absolute;top:5px;left:5px;font-size:9px;font-weight:700;letter-spacing:.04em;padding:2px 4px;border-radius:4px;background:#7f1d1d;color:#fecaca}
 .tile .wb{position:absolute;top:5px;right:5px;font-size:9.5px;font-weight:600;letter-spacing:.03em;padding:3px 5px;border-radius:5px;background:#1d1b24;color:var(--warn)}
 .tile.scan::after{content:"";position:absolute;left:0;right:0;height:35%;top:-35%;background:linear-gradient(180deg,rgba(139,92,246,0),rgba(139,92,246,.28) 70%,#a78bfa 96%,rgba(139,92,246,0));animation:scan .7s linear forwards;pointer-events:none}
 @keyframes scan{to{top:100%}}
@@ -345,12 +346,14 @@ textarea:focus{border-color:var(--accent2)}
             <select class="sel" id="model">
               <option value="nano-banana-2">Nano Banana 2 · recommended · ~$0.08</option>
               <option value="nano-banana-pro">Nano Banana Pro · best detail · ~$0.15</option>
-              <option value="flux-kontext">FLUX.1 Kontext Pro · cheapest · ~$0.04</option>
+              <option value="flux-kontext">FLUX.1 Kontext Pro · cheapest · ~$0.04 · no product refs</option>
             </select></div>
+          <div class="fgrid" style="grid-template-columns:52px 1fr"><label for="res">Output</label>
+            <select class="sel" id="res"><option value="1K">1K · fastest</option><option value="2K" selected>2K · sharper labels</option><option value="4K">4K · best detail, ~2× cost</option></select></div>
           <div class="f" id="codeRow" style="display:none;margin-bottom:8px"><span style="width:auto">Demo code</span><input id="demoCode" type="password" autocomplete="off" aria-label="Demo code"></div>
           <div style="display:flex;gap:8px"><button class="btn pri" id="renderBtn" type="button" style="flex:1;height:38px"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>Render with AI</button>
             <button class="btn" id="copyPrompt" type="button" style="height:38px" title="Copy prompt"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy prompt</button></div>
-          <p class="note">Sends the framed comp (the size picked in step 4) and this prompt to the model. The products go in as pixels, so the model only relights them.</p>
+          <p class="note">Sends the framed comp at up to 2560px plus each product's full-resolution cut-out as a separate reference, so the model copies labels instead of guessing them. Use product photos at least 1200px tall.</p>
         </div>
         <div>
           <p class="label" id="resLabel">What refinement does</p>
@@ -506,7 +509,7 @@ async function addFiles(files){
   const list=[...files].filter(f=>/^image\//.test(f.type));
   if(!list.length){toast('Those files aren\'t images');return}
   for(const f of list){
-    try{const im=await loadFile(f);const c=toCanvas(im);
+    try{const im=await loadFile(f);const c=toCanvas(im,4096);
       S.lib.push({id:uid++,name:f.name.replace(/\.[^.]+$/,''),orig:c,img:c,cut:false,dims:null,thumb:thumbURL(c)});
     }catch(e){toast('Couldn\'t read '+f.name)}
   }
@@ -541,7 +544,7 @@ function renderLib(){
     const t=document.createElement('div');t.className='tile'+(it.cut?' cut':'')+(S.libSel===it.id?' sel':'');
     t.dataset.id=it.id;if(S.justCut===it.id)t.classList.add('justcut');t.tabIndex=0;t.draggable=true;t.title=it.name+(it.cut?' · '+(it.cutInfo||'cut out'):' · white background not removed yet');
     t.innerHTML=`<img alt="${esc(it.name)}" src="${it.thumb}">`+
-      (it.cut?'<span class="ck"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>':'<span class="wb">White BG</span>')+
+      (lowRes(it)?'<span class="lo" title="Under '+LABEL_MIN+'px tall: labels may garble">LOW-RES</span>':'')+(it.cut?'<span class="ck"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>':'<span class="wb">White BG</span>')+
       `<span class="chip${it.dims?'':' no'}">${it.dims&&it.dims.h?fmtN(toU(it.dims.h))+' '+S.units+' H':'Needs size'}</span>`+
       `<span class="acts"><button type="button" data-a="add" aria-label="Add ${esc(it.name)} to canvas" title="Add to canvas"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" data-a="del" aria-label="Remove ${esc(it.name)}" title="Remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>`;
     t.addEventListener('click',e=>{const a=e.target.closest('button')?.dataset.a;
@@ -687,7 +690,7 @@ function draw(){
     c.fillStyle='rgba(60,56,72,.9)';c.textAlign='center';c.font='600 14px Inter,system-ui,sans-serif';
     c.fillText(S.lib.length?'Drag products here or double-click them':'Your real-scale canvas',v.ox+cw/2,v.oy+ch/2-6);
     c.font='12px Inter,system-ui,sans-serif';c.fillStyle='rgba(60,56,72,.75)';
-    c.fillText('Each grid square is 1 '+(S.units==='cm'?'cm':'inch')+'. Add a background with the image button above.',v.ox+cw/2,v.oy+ch/2+16);
+    c.fillText('1 grid square = 1 '+(S.units==='cm'?'cm':'inch'),v.ox+cw/2,v.oy+ch/2+16);
   }
 }
 const hasH=L=>{const it=libById(L.lib);return !!(it&&it.dims&&it.dims.h)};
@@ -852,7 +855,7 @@ function renderLayers(){
     const it=libById(L.lib);if(!it)return;names[it.id]=(names[it.id]||0)+1;
     const r=document.createElement('div');r.className='lrow'+(S.sel===L.id?' sel':'');r.draggable=true;r.dataset.id=L.id;r.tabIndex=0;
     const dupN=S.layers.filter(x=>x.lib===it.id).length>1?' '+names[it.id]:'';
-    r.innerHTML=`<span class="grip" aria-hidden="true">⋮⋮</span><span class="lt"><img alt="" src="${it.thumb}"></span><span class="ln">${esc(it.name)}${dupN}${toScale(L)?'':' <span class="lw">⚠</span>'}</span>
+    r.innerHTML=`<span class="grip" aria-hidden="true">⋮⋮</span><span class="lt"><img alt="" src="${it.thumb}"></span><span class="ln">${esc(it.name)}${dupN}${(toScale(L)&&!lowRes(it))?'':' <span class="lw" title="'+(lowRes(it)?'Low-res source':'Not to scale')+'">⚠</span>'}</span>
       <button type="button" data-a="up" title="Bring forward" aria-label="Bring ${esc(it.name)} forward"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
       <button type="button" data-a="down" title="Send back" aria-label="Send ${esc(it.name)} back"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
       <button type="button" class="x" data-a="del" title="Delete" aria-label="Delete ${esc(it.name)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
@@ -940,6 +943,7 @@ function renderInspector(){
   }
   const d=it.dims||{};const ar=it.img.width/it.img.height;const autoW=d.h?d.h*ar:null;
   let note='';
+  const lr=lowRes(it)?`<p class="note warn">Low-res source: ${it.img.width}×${it.img.height}px after cropping. Labels need about ${LABEL_MIN}px of height to survive AI refinement, so swap in a higher-res photo if you have one.</p>`:'';
   if(d.h&&d.byEye)note='<p class="note warn">Height set by dragging. Type the real height to be sure it\'s to scale.</p>';
   else if(!d.h)note='<p class="note warn">No height set, so this product is at a placeholder size. Enter its real height to lock it to scale.</p>';
   else if(d.listW&&Math.abs(autoW-d.listW)/d.listW>.15)note=`<p class="note warn">The listing says ${fmtU(d.listW)} wide, but at this height the photo is ${fmtU(autoW)}. Check that the height is the product's, not the box's.</p>`;
@@ -951,7 +955,7 @@ function renderInspector(){
       <div class="f" style="opacity:.7" title="Calculated from the photo's proportions"><span>W</span><input type="text" readonly tabindex="-1" value="${autoW?fmtN(toU(autoW)):'—'}" aria-label="Width, calculated"><em>auto</em></div>
     </div></div>
     <div class="toggle" style="margin-top:8px"><span style="color:var(--faint);font-size:11.5px;min-width:0;flex:1">${esc(it.name)}</span>${unitSeg('useg')}</div>
-    ${note}
+    ${note}${lr}
     <label class="f" style="margin-top:8px"><span style="width:auto">ASIN</span><input id="dasin" type="text" spellcheck="false" placeholder="Paste ASIN or Amazon link" value="${esc(it.asin||'')}" aria-label="ASIN or Amazon link"></label>
     ${it.asin?`<a class="linkbtn" style="display:inline-block" href="https://www.amazon.com/dp/${it.asin}" target="_blank" rel="noopener">Open listing on Amazon ↗</a><br>`:''}
     <button class="linkbtn" id="pasteT" type="button">Paste listing text to fill in the size</button>
@@ -1032,7 +1036,28 @@ $('#copyPrompt').onclick=async()=>{try{await navigator.clipboard.writeText($('#p
 const RENDER_URL='/api/refine';
 const MODEL_NAMES={'nano-banana-2':'Nano Banana 2','nano-banana-pro':'Nano Banana Pro','flux-kontext':'FLUX.1 Kontext Pro'};
 let rendering=false;
-function compDataURL(){
+const LABEL_MIN=1200; // px tall a cut-out needs for labels to survive refinement
+const lowRes=it=>it&&it.cut&&it.img.height<LABEL_MIN;
+function refDataURL(it,max){const k=Math.min(1,max/Math.max(it.img.width,it.img.height));const pad=Math.round(Math.max(it.img.width,it.img.height)*k*.06);
+  const c=mk(it.img.width*k+pad*2,it.img.height*k+pad*2),x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingQuality='high';
+  x.drawImage(it.img,pad,pad,it.img.width*k,it.img.height*k);return c.toDataURL('image/jpeg',.92)}
+function compDataURL(max=2560){
+  const p=PRESETS[S.preset],cr=cropRect();const want=Math.max(max,p.w||0);
+  // render the comp directly at the send size (no double resampling)
+  const ow=Math.round(Math.min(want,max)*(cr.w>=cr.h?1:cr.w/cr.h)),oh=Math.round(ow*cr.h/cr.w);
+  const src=mk(ow,oh),sx=src.getContext('2d');sx.fillStyle='#fff';sx.fillRect(0,0,ow,oh);const ppi=ow/cr.w;
+  drawScene(sx,ppi,-cr.x*ppi,-cr.y*ppi,{paper:true,bg:true,grid:false,shadows:true});
+  return src.toDataURL('image/jpeg',.92);
+}
+function buildPayload(model){
+  const multi=model!=='flux-kontext';const items=[...new Set(S.layers.map(l=>l.lib))].map(libById).filter(Boolean).slice(0,8);
+  let comp=compDataURL(2560),refMax=2048,refs=multi?items.map(it=>refDataURL(it,refMax)):[];
+  const total=()=>comp.length+refs.reduce((a,r)=>a+r.length,0);
+  while(total()>5_000_000&&refMax>700){refMax=Math.round(refMax*.8);refs=items.map(it=>refDataURL(it,refMax))}
+  if(total()>5_000_000)comp=compDataURL(1920);
+  return{comp,refs,refNames:multi?items.map(i=>i.name):[]};
+}
+function compDataURL_old(){
   const src=renderOut(S.preset,false,'jpg');const k=Math.min(1,1536/Math.max(src.width,src.height));
   const c=mk(src.width*k,src.height*k);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(src,0,0,c.width,c.height);
   return c.toDataURL('image/jpeg',.9);
@@ -1057,14 +1082,20 @@ async function renderAI(){
   if(rendering)return;
   if(!S.layers.length){toast('Place at least one product first');return}
   if(S.layers.some(l=>!toScale(l))&&!window.confirm('Some products aren\'t locked to real scale. Render anyway?'))return;
-  const model=$('#model').value,prompt=$('#promptOut').textContent,before=compDataURL(),t0=Date.now();
+  const model=$('#model').value;
+  const lows=[...new Set(S.layers.map(l=>libById(l.lib)))].filter(lowRes);
+  if(lows.length&&!window.confirm(`${lows.length} product photo${lows.length>1?'s are':' is'} under ${LABEL_MIN}px tall (${lows.map(i=>i.name+': '+i.img.height+'px').join(', ')}). Small labels will likely come out garbled. Render anyway?`))return;
+  const {comp,refs,refNames}=buildPayload(model);
+  let prompt=$('#promptOut').textContent;
+  if(refs.length)prompt='The first image is the composition to refine. The other images are high-resolution references of the exact products in it, in this order: '+refNames.join(', ')+'. Copy their label text, logos, typography and details exactly from the references; do not reinterpret any lettering. Keep the background scene from the first image unchanged except for lighting. '+prompt;
+  const before=comp,t0=Date.now(),res=$('#res').value;
   const btn=$('#renderBtn');rendering=true;btn.disabled=true;btn.lastChild.textContent='Rendering…';
   showStages(before,model,0,t0);
   const tick=setInterval(()=>{const e=$('#elapsed');if(e)e.textContent=Math.round((Date.now()-t0)/1000)+'s'},500);
   const done=()=>{clearInterval(tick);rendering=false;btn.disabled=false;btn.lastChild.textContent='Render with AI'};
   try{
     if(location.protocol==='file:')throw{local:true};
-    let r=await fetch(RENDER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:before,prompt,model,code:$('#demoCode').value})});
+    let r=await fetch(RENDER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:comp,refs,prompt,model,res,code:$('#demoCode').value})});
     const ct=r.headers.get('content-type')||'';
     if(!ct.includes('json'))throw{local:true};
     let d=await r.json();
@@ -1189,12 +1220,21 @@ $('#sampleBtn').onclick=async()=>{await loadSamples();commit();renderLib();refre
 /* ---------- init ---------- */
 fitCrop();commit();renderLib();refresh();
 new ResizeObserver(resize).observe(stage);resize();
+if(/#shot-/.test(location.href)){(async()=>{
+  await loadDemo();$('#how').classList.remove('open');
+  if(location.hash==='#shot-white'){return}
+  for(const it of S.lib){it.img=cutout(it.orig,S.cutOpts);it.cut=true;it.thumb=thumbURL(it.img);it.cutInfo=it.orig.width+'×'+it.orig.height+' → '+it.img.width+'×'+it.img.height+' px'}
+  $('#cutSum').textContent='✓ 4 products: white removed, cropped to the nearest pixel. Drag them onto the canvas.';
+  if(location.hash==='#shot-cut'){renderLib();refresh();draw();return}
+  addLayer(S.lib[0].id,4.6,5.75);addLayer(S.lib[1].id,6.55,5.95);addLayer(S.lib[3].id,8.9,5.42);
+  S.sel=S.layers[2].id;renderLib();refresh();draw();
+})()}
 if(/[?#&]test\b/.test(location.href)){(async()=>{
   await loadDemo();const blocked=(addLayer(S.lib[0].id),S.layers.length);
   await removeBackgrounds();
   addLayer(S.lib[0].id,4,5.6);addLayer(S.lib[1].id,6,5.8);addLayer(S.lib[2].id,7.6,5.5);addLayer(S.lib[3].id,9.4,5.3);
   S.sel=location.hash.includes('bg')?null:S.layers[3].id;S.tool='select';renderLib();refresh();draw();
-  if(location.hash.includes('render')){S.lib[2].dims={h:3.4};refresh();await renderAI();}
+  if(location.hash.includes('render')){window.confirm=()=>true;S.lib[2].dims={h:3.4};refresh();await renderAI();}
   document.title='OK blocked='+blocked+' '+S.lib.map(i=>i.cutInfo).join(' | ');
 })()}
 })();
